@@ -61,12 +61,21 @@ import org.wso2.carbon.user.core.UserStoreManager;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.KeyManagementException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.security.cert.CertificateException;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -77,6 +86,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -375,6 +387,42 @@ public class OpenIDConnectAuthenticator extends AbstractApplicationAuthenticator
         return authorizationEP;
     }
 
+    /**
+     * This method is used to create a custom SSL Context instead of using the default
+     *
+     * @return The custom SSLContext
+     * @throws KeyStoreException Throws a KeyStoreException
+     * @throws NoSuchAlgorithmException Throws a NoSuchAlgorithmException
+     * @throws CertificateException Throws a CertificateException
+     * @throws IOException Throws a IOException
+     * @throws KeyManagementException Throws a KeyManagementException
+     */
+    private static SSLContext createCustomSSLContext()
+            throws KeyStoreException, NoSuchAlgorithmException, CertificateException, IOException,
+            KeyManagementException {
+        String trustStorePath = System.getProperty(OIDCAuthenticatorConstants.TRUSTSTORE);
+        String trustStorePassword = System.getProperty(OIDCAuthenticatorConstants.TRUSTSTORE_PASSWORD);
+        String trustStoreType = System.getProperty(OIDCAuthenticatorConstants.TRUSTSTORE_TYPE);
+        if (trustStorePath == null || trustStorePassword == null) {
+            throw new IllegalArgumentException("Truststore properties are not properly set.");
+        }
+        if (trustStoreType == null) {
+            trustStoreType = "JKS";
+        }
+        KeyStore trustStore = KeyStore.getInstance(trustStoreType);
+        // Load Truststore
+        try (InputStream is = Files.newInputStream(Paths.get(trustStorePath))) {
+            trustStore.load(is, trustStorePassword.toCharArray());
+        }
+        // Initialize TrustManagerFactory
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        tmf.init(trustStore);
+        // Create SSL context
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, tmf.getTrustManagers(), new SecureRandom());
+        return context;
+    }
+
     @Override
     protected void processAuthenticationResponse(HttpServletRequest request, HttpServletResponse response,
                                                  AuthenticationContext context) throws AuthenticationFailedException {
@@ -383,6 +431,20 @@ public class OpenIDConnectAuthenticator extends AbstractApplicationAuthenticator
 
             OAuthAuthzResponse authzResponse = OAuthAuthzResponse.oauthCodeAuthzResponse(request);
             OAuthClientRequest accessTokenRequest = getAccessTokenRequest(context, authzResponse);
+
+            SSLContext sslContext;
+            boolean isInternalSSLContextEnabled = Boolean.parseBoolean(
+                    System.getProperty(OIDCAuthenticatorConstants.INTERNAL_SSL_CONTEXT_ENABLED));
+            if (isInternalSSLContextEnabled) {
+                try {
+                    // Set custom SSL context globally
+                    sslContext = createCustomSSLContext();
+                    HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.getSocketFactory());
+                } catch (KeyStoreException | IOException | NoSuchAlgorithmException | CertificateException |
+                        KeyManagementException e) {
+                    log.error("Failed to initialize custom SSL context for authentication", e);
+                }
+            }
 
             // Create OAuth client that uses custom http client under the hood
             OAuthClient oAuthClient = new OAuthClient(new URLConnectionClient());

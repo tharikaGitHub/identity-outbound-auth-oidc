@@ -48,6 +48,10 @@ public class OIDCAuthenticatorConstants {
 
     public static final String POST_LOGOUT_REDIRECT_URI = "post_logout_redirect_uri";
     public static final String ID_TOKEN_HINT = "id_token_hint";
+    public static final String TRUSTSTORE = "javax.net.ssl.trustStore";
+    public static final String TRUSTSTORE_PASSWORD = "javax.net.ssl.trustStorePassword";
+    public static final String TRUSTSTORE_TYPE = "javax.net.ssl.trustStoreType";
+    public static final String INTERNAL_SSL_CONTEXT_ENABLED = "enableInternalSSLContext";
 
     public class AuthenticatorConfParams {
 
